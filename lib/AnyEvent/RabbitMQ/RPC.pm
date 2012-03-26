@@ -211,7 +211,7 @@ sub call {
     }
 
     my $sent_failure = $args{on_sent} ? sub {
-        $args{on_sent}->send(0);
+        $args{on_sent}->(0);
         $args{on_failure}->(@_);
     } : $args{on_failure};
 
@@ -238,7 +238,7 @@ sub call {
                 delivery_mode => 2, # Persistent storage
             },
         );
-        $args{on_sent}->send(1) if $args{on_sent};
+        $args{on_sent}->(1) if $args{on_sent};
     };
 
     unless ($args{on_reply}) {
