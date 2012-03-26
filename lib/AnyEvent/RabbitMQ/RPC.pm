@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use AnyEvent::RabbitMQ;
+use Try::Tiny;
 
 sub new {
     my $class = shift;
@@ -123,17 +124,40 @@ sub register {
                 no_ack     => 0,
                 on_consume => sub {
                     my $frame = shift;
+                    my $failed;
                     my $args = $frame->{body}->payload;
-                    $args = $self->{unserialize}->($args)
-                        if $self->{unserialize};
+                    if ($self->{unserialize}) {
+                        try {
+                            $args = $self->{unserialize}->($args);
+                        } catch {
+                            $failed = 1;
+                            $args{on_failure}->("Unserialization failed: $_");
+                        };
+                        return if $failed;
+                    }
 
                     # Call the sub
-                    my $return = $args{run}->( $args );
+                    my $return;
+                    try {
+                        $return = $args{run}->( $args );
+                    } catch {
+                        $failed = 1;
+                        $args{on_failure}->("Call died: $_");
+                    };
+                    return if $failed;
 
                     # Send the response, if they asked for it
                     if (my $reply_to = $frame->{header}->reply_to) {
-                        $return = $self->{serialize}->($return)
-                            if $self->{serialize};
+                        if ($self->{serialize}) {
+                            try {
+                                $return = $self->{serialize}->($return);
+                            } catch {
+                                $failed = 1;
+                                $args{on_failure}->("Serialization failed: $_");
+                            };
+                            return if $failed;
+                        }
+
                         $return = "0E0" if not $return;
                         $self->channel->publish(
                             exchange => '',
@@ -184,8 +208,16 @@ sub call {
     my $send; $send = sub {
         my $REPLIES = shift;
         my $args = $args{args};
-        $args = $self->{serialize}->($args)
-            if $self->{serialize};
+        if ($self->{serialize}) {
+            my $failed;
+            try {
+                $args = $self->{serialize}->($args);
+            } catch {
+                $failed = 1;
+                $args{on_failure}->("Serialization failed: $_");
+            };
+            return if $failed;
+        }
         $args = "0E0" if not $args;
         $self->channel->publish(
             exchange    => '',
@@ -226,8 +258,16 @@ sub call {
                                 queue => $REPLIES,
                             );
                             my $return = $frame->{body}->payload;
-                            $return = $self->{unserialize}->($return)
-                                if $self->{unserialize};
+                            if ($self->{unserialize}) {
+                                my $failed;
+                                try {
+                                    $return = $self->{unserialize}->($return);
+                                } catch {
+                                    $args{on_failure}->("Unserialization failed: $_");
+                                    $failed = 1;
+                                };
+                                return if $failed;
+                            }
                             $args{on_reply}->($return);
                         },
                         on_success => sub { $send->($REPLIES) },
