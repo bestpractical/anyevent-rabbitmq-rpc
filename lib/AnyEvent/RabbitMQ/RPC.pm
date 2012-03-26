@@ -13,6 +13,8 @@ sub new {
     my $self = bless {}, $class;
 
     my $cv = AE::cv;
+    my $success = $args{on_success} || $cv;
+    my $failure = $args{on_failure} || $cv;
 
     $self->{connection} = $args{connection};
     my $channel = sub {
@@ -20,11 +22,11 @@ sub new {
             on_success => sub {
                 $self->{channel} = shift;
                 $self->{channel}->qos;
-                $cv->send($self);
+                $success->($self);
             },
             on_failure => sub {
                 warn "Channel failed: @_";
-                $cv->send();
+                $failure->();
             }
         );
     };
@@ -38,7 +40,7 @@ sub new {
             on_success => $channel,
             on_failure => sub {
                 warn "Connect failed: @_";
-                $cv->send();
+                $failure->();
             }
         );
     }
@@ -60,7 +62,10 @@ sub new {
         $self->{unserialize} = sub { (@{ Storable::thaw(@_) })[0] };
     }
 
-    # Block on having set up the channel
+    # If they have a callback waiting for them, bail now
+    return if $args{on_success};
+
+    # Otherwise, block on having set up the channel
     return $cv->recv;
 }
 
