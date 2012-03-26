@@ -14,9 +14,9 @@ sub new {
 
     my $cv = AE::cv;
 
-    my $amqp = $args{connection};
+    $self->{connection} = $args{connection};
     my $channel = sub {
-        $amqp->open_channel(
+        $self->connection->open_channel(
             on_success => sub {
                 $self->{channel} = shift;
                 $self->{channel}->qos;
@@ -28,12 +28,12 @@ sub new {
             }
         );
     };
-    if ($amqp) {
+    if ($self->connection) {
         $channel->();
     } else {
         AnyEvent::RabbitMQ->load_xml_spec;
-        $amqp = AnyEvent::RabbitMQ->new(timeout => 1, verbose => 0);
-        $amqp->connect(
+        $self->{connection} = AnyEvent::RabbitMQ->new(timeout => 1, verbose => 0);
+        $self->connection->connect(
             %args,
             on_success => $channel,
             on_failure => sub {
@@ -62,6 +62,11 @@ sub new {
 
     # Block on having set up the channel
     return $cv->recv;
+}
+
+sub connection {
+    my $self = shift;
+    return $self->{connection};
 }
 
 sub channel {
