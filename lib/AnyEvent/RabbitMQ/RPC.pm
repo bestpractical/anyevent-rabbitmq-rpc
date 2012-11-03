@@ -14,7 +14,10 @@ sub new {
 
     my $cv = AE::cv;
     my $success = $args{on_success} || $cv;
-    my $failure = $args{on_failure} || $cv;
+    my $failure = $args{on_failure} || sub {
+        warn "@_";
+        $cv->(undef);
+    };
 
     $self->{connection} = $args{connection};
     my $channel = sub {
@@ -25,8 +28,7 @@ sub new {
                 $success->($self);
             },
             on_failure => sub {
-                warn "Channel failed: @_";
-                $failure->();
+                $failure->("Channel failed: @_");
             }
         );
     };
@@ -39,8 +41,7 @@ sub new {
             %args,
             on_success => $channel,
             on_failure => sub {
-                warn "Connect failed: @_";
-                $failure->();
+                $failure->("Connect failed: @_");
             }
         );
     }
@@ -193,7 +194,7 @@ sub call {
         name => undef,
         args => undef,
         on_sent => undef,
-        on_failure => sub { warn "Failure: @_" },
+        on_failure => sub { warn "RPC Failure: @_" },
         @_
     );
 
