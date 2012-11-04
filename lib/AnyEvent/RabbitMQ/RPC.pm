@@ -6,6 +6,8 @@ use warnings;
 use AnyEvent::RabbitMQ;
 use Try::Tiny;
 
+our $VERSION = '0.5';
+
 sub new {
     my $class = shift;
     my %args = @_;
