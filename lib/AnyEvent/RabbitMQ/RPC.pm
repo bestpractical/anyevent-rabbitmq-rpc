@@ -127,6 +127,27 @@ sub register {
         @_
     );
 
+    my $run = delete $args{run};
+
+    $self->register_async(
+        run => sub {
+            my %args = @_;
+            $args{on_success}->( $run->( $args{args} ) );
+        },
+        %args,
+    );
+}
+
+
+sub register_async {
+    my $self = shift;
+    my %args = (
+        name => undef,
+        run  => sub {},
+        on_failure => sub { warn "Failure: @_" },
+        @_
+    );
+
     # Ensure we have the queue
     $self->rpc_queue(
         queue      => $args{name},
@@ -149,38 +170,43 @@ sub register {
                         return if $failed;
                     }
 
-                    # Call the sub
-                    my $return;
-                    try {
-                        $return = $args{run}->( $args );
-                    } catch {
-                        $failed = 1;
-                        $args{on_failure}->("Call died: $_");
-                    };
-                    return if $failed;
-
-                    # Send the response, if they asked for it
+                    my $done = sub { $self->channel->ack };
                     if (my $reply_to = $frame->{header}->reply_to) {
-                        if ($self->{serialize}) {
-                            try {
-                                $return = $self->{serialize}->($return);
-                            } catch {
-                                $failed = 1;
-                                $args{on_failure}->("Serialization failed: $_");
-                            };
-                            return if $failed;
-                        }
+                        $done = sub {
+                            my ($return) = @_;
+                            if ($self->{serialize}) {
+                                try {
+                                    $return = $self->{serialize}->($return);
+                                } catch {
+                                    $failed = 1;
+                                    $args{on_failure}->("Serialization failed: $_");
+                                };
+                                return if $failed;
+                            }
 
-                        $return = "0E0" if not $return;
-                        $self->channel->publish(
-                            exchange => '',
-                            routing_key => $reply_to,
-                            body => $return,
-                        );
+                            $return = "0E0" if not $return;
+                            $self->channel->publish(
+                                exchange => '',
+                                routing_key => $reply_to,
+                                body => $return,
+                            );
+                            $self->channel->ack;
+                        };
                     }
 
-                    # And finally mark the task as complete
-                    $self->channel->ack;
+                    try {
+                        $args{run}->(
+                            args => $args,
+                            on_failure => $args{on_failure},
+                            on_success => sub {
+                                $done->( @_ );
+                            },
+                        );
+                    } catch {
+                        $failed = 1;
+                        $args{on_failure}->("Call failed: $_");
+                    };
+                    return if $failed;
                 },
                 on_failure => $args{on_failure},
             );
