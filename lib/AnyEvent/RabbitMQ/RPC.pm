@@ -38,7 +38,7 @@ sub new {
         $channel->();
     } else {
         AnyEvent::RabbitMQ->load_xml_spec;
-        $self->{connection} = AnyEvent::RabbitMQ->new(timeout => 1, verbose => 0);
+        $self->{connection} = AnyEvent::RabbitMQ->new(timeout => 1, verbose => 0, tune => {heartbeat => 30, frame_max => 0});
         $self->connection->connect(
             %args,
             on_success => $channel,
